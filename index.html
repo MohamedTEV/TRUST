@@ -57,6 +57,13 @@
   .row.ours .val { color: var(--trust); font-weight: 700; }
   .note { color: var(--sub); font-size: .9rem; margin-top: 14px; }
   @media (max-width: 560px) { .row { grid-template-columns: 96px 1fr 52px; gap: 8px; } .row .name { font-size: .85rem; } }
+  .hero { margin-bottom: 8px; }
+  .stage { display: flex; justify-content: center; gap: 10px; margin: 2px 0 6px; flex-wrap: wrap; }
+  .stage button { font: inherit; padding: 6px 18px; border-radius: 999px; border: 1px solid var(--rule);
+                  background: transparent; color: var(--sub); cursor: pointer; transition: all .15s ease; }
+  .stage button.on { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+  #viz { width: 100%; height: 340px; display: block; }
+  .vcap { text-align: center; color: var(--sub); font-size: 1rem; margin: 6px 0 0; min-height: 1.6em; }
   footer { text-align: center; color: var(--sub); font-size: .9rem; margin-top: 56px; }
 </style>
 </head>
@@ -70,6 +77,16 @@
   <div class="buttons">
     <span class="btn">Paper <small>coming soon</small></span>
     <span class="btn">Code <small>coming soon</small></span>
+  </div>
+
+  <div class="card hero">
+    <div class="stage">
+      <button data-s="0" class="on">CLIP</button>
+      <button data-s="1">DINO</button>
+      <button data-s="2">TRUST</button>
+    </div>
+    <canvas id="viz" aria-label="CLIP, DINO and TRUST on a remote sensing archive"></canvas>
+    <p class="vcap" id="vcap"></p>
   </div>
 
   <section>
@@ -169,6 +186,56 @@
   }
   pills("pills-bias", drawBias); pills("pills-acc", drawAcc);
   requestAnimationFrame(() => { drawBias("Average"); drawAcc("Average"); });
+})();
+
+(function () {
+  const cv = document.getElementById("viz"), ctx = cv.getContext("2d"), cap = document.getElementById("vcap");
+  const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  const captions = ["CLIP knows the class names, but its predictions are biased toward a few classes.",
+                    "DINO captures the structure of the scenes, but cannot name them.",
+                    "TRUST names the scenes, without bias and without a single label."];
+  const names = ["beach", "crosswalk", "railway"];
+  const centres = [[-0.32, 0.18], [0.32, 0.2], [0, -0.3]];
+  let rnd = 7; const r = () => (rnd = (rnd * 16807) % 2147483647) / 2147483647;
+  const gauss = () => Math.sqrt(-2 * Math.log(r() + 1e-9)) * Math.cos(2 * Math.PI * r());
+  const pts = [];
+  for (let c = 0; c < 3; c++) for (let i = 0; i < 80; i++) {
+    const g1 = [gauss(), gauss()], g2 = [gauss(), gauss()];
+    const biased = r() < 0.55 ? 1 : c;                         // CLIP: many points pulled to one class
+    pts.push({ c, b: biased, mixed: [centres[c][0] * 0.45 + g1[0] * 0.17, centres[c][1] * 0.45 + g1[1] * 0.17],
+               clean: [centres[c][0] + g2[0] * 0.055, centres[c][1] + g2[1] * 0.055] });
+  }
+  let stage = 0, t = 1;
+  const pal = () => [css("--transclip"), css("--zs"), css("--adapt")];
+  function size() { const d = devicePixelRatio || 1; cv.width = cv.clientWidth * d; cv.height = cv.clientHeight * d;
+                    ctx.setTransform(d, 0, 0, d, 0, 0); }
+  function draw() {
+    const W = cv.clientWidth, H = cv.clientHeight, s = Math.min(W, H) * 0.95, col = pal(), grey = css("--sub");
+    ctx.clearRect(0, 0, W, H);
+    const e = t < 1 ? 1 - Math.pow(1 - t, 3) : 1;
+    for (const p of pts) {
+      const to = stage === 0 ? p.mixed : p.clean, from = stage === 0 ? p.clean : (stage === 1 ? p.mixed : p.clean);
+      const x = W / 2 + (from[0] + (to[0] - from[0]) * e) * s, y = H / 2 - (from[1] + (to[1] - from[1]) * e) * s;
+      ctx.beginPath(); ctx.arc(x, y, 3.3, 0, 2 * Math.PI);
+      ctx.fillStyle = stage === 1 ? grey : col[stage === 0 ? p.b : p.c];
+      ctx.globalAlpha = stage === 1 ? 0.5 : 0.92; ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    if (stage === 2 && e > 0.6) {
+      ctx.font = "600 15px 'Source Serif 4', Georgia, serif"; ctx.textAlign = "center";
+      centres.forEach((c, k) => { ctx.fillStyle = col[k];
+        ctx.fillText(names[k], W / 2 + c[0] * s, H / 2 - c[1] * s - (c[1] > 0 ? 36 : -44)); });
+    }
+    if (t < 1) { t = Math.min(1, t + 0.03); requestAnimationFrame(draw); }
+  }
+  function go(k) { stage = k; t = 0; cap.textContent = captions[k];
+    document.querySelectorAll(".stage button").forEach(b => b.classList.toggle("on", +b.dataset.s === k));
+    requestAnimationFrame(draw); }
+  document.querySelectorAll(".stage button").forEach(b => {
+    b.addEventListener("mouseenter", () => go(+b.dataset.s)); b.addEventListener("click", () => go(+b.dataset.s)); });
+  addEventListener("resize", () => { size(); t = 1; draw(); });
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { t = 1; draw(); });
+  size(); go(0);
 })();
 </script>
 </body>
